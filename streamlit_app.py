@@ -1,72 +1,94 @@
 import streamlit as st
 import pandas as pd
+import requests
 
-# 1. 샘플 데이터 구축 (낙인 기준 및 상세 정보 포함)
-data = [
-    # --- 종목형 ---
-    {"카테고리": "💎 초저낙인 종목형 [ KI20 ]", "유형": "종목형", "증권사": "키움", "종목번호": "1734", "수익률": 16.0, "기초자산": "AVGO/PLTR", "마감일": "~01.29 (26)"},
-    {"카테고리": "💎 초저낙인 종목형 [ KI20 ]", "유형": "종목형", "증권사": "삼성", "종목번호": "30719", "수익률": 15.0, "기초자산": "PLTR/TSLA", "마감일": "~01.28 (23)"},
-    {"카테고리": "💎 초저낙인 종목형 [ KI20 ]", "유형": "종목형", "증권사": "삼성", "종목번호": "30741", "수익률": 13.5, "기초자산": "PLTR/TSLA", "마감일": "~02.05 (2)"},
+# ---------------------------------------------------------
+# 1. 금융감독원 Open API 인증키 설정
+# ---------------------------------------------------------
+API_KEY = "S0%2BzGZ9bwR8NYWqHCwXmbH2wQU9VccXjo0h2OVQIt0mrb0%2BDCnJZhm2oOwqTkGN%2BYwtVhbDZYkV4YtPUYEu4Qg%3D%3D"
+
+st.set_page_config(page_title="실시간 ELS/ELB 큐레이터", layout="wide")
+
+st.title("📢 실시간 ELS/ELB 추천 브리핑 (금감원 API 연동)")
+st.caption("금융감독원 통합공시 API를 통해 매일 청약 중인 실제 ELS/ELB 정보를 실시간으로 수집합니다.")
+
+# ---------------------------------------------------------
+# 2. 금감원 API 데이터 실시간 호출 함수
+# ---------------------------------------------------------
+@st.cache_data(ttl=3600)  # 1시간마다 데이터 자동 갱신
+def fetch_els_data(api_key):
+    # 금융감독원 파생결합증권(ELS) 상품 조회 API URL
+    url = f"http://finlife.fss.or.kr/finlifeapi/elsOptionSearch.json?auth={api_key}&topFinGrpNo=060000&pageNo=1"
     
-    {"카테고리": "🛡️ 저낙인 종목형 [ KI25 ]", "유형": "종목형", "증권사": "미래", "종목번호": "37438", "수익률": 21.0, "기초자산": "MU/TSLA", "마감일": "~01.28 (23)"},
-    {"카테고리": "🛡️ 저낙인 종목형 [ KI25 ]", "유형": "종목형", "증권사": "NH", "종목번호": "24401", "수익률": 20.94, "기초자산": "MU/PLTR", "마감일": "~01.29 (26)"},
-    {"카테고리": "🛡️ 저낙인 종목형 [ KI25 ]", "유형": "종목형", "증권사": "한투", "종목번호": "18481", "수익률": 20.6, "기초자산": "MU/PLTR", "마감일": "~02.03 (29)"},
+    try:
+        response = requests.get(url, timeout=10)
+        data = response.json()
+        
+        # API 정상 응답 확인
+        if data.get("result", {}).get("err_cd") == "000":
+            base_list = data["result"].get("baseList", [])
+            option_list = data["result"].get("optionList", [])
+            
+            # 기본 정보와 옵션 정보 결합
+            df_base = pd.DataFrame(base_list)
+            df_option = pd.DataFrame(option_list)
+            
+            if not df_base.empty and not df_option.empty:
+                merged = pd.merge(df_base, df_option, on="fin_prdt_cd", how="inner")
+                return merged, None
+            else:
+                return pd.DataFrame(), "현재 청약 가능 기간인 ELS/ELB 상품이 없거나 공시 전입니다."
+        else:
+            err_msg = data.get("result", {}).get("err_msg", "API 인증 오류")
+            return pd.DataFrame(), f"API 오류: {err_msg}"
+            
+    except Exception as e:
+        return pd.DataFrame(), f"데이터를 불러오는 중 오류가 발생했습니다: {str(e)}"
 
-    # --- 지수형 ---
-    {"카테고리": "📉 초저낙인 지수형 [ KI35 ]", "유형": "지수형", "증권사": "키움", "종목번호": "3812", "수익률": 9.6, "기초자산": "H/K/N", "마감일": "~01.29 (26)"},
-    {"카테고리": "📉 초저낙인 지수형 [ KI35 ]", "유형": "지수형", "증권사": "키움", "종목번호": "3807", "수익률": 8.7, "기초자산": "K/N/S", "마감일": "~01.29 (26)"},
-    {"카테고리": "📉 초저낙인 지수형 [ KI35 ]", "유형": "지수형", "증권사": "메리츠", "종목번호": "227", "수익률": 8.6, "기초자산": "E/N/S", "마감일": "~01.30 (26)"},
+# ---------------------------------------------------------
+# 3. 실시간 데이터 수집 및 정제
+# ---------------------------------------------------------
+with st.spinner("금융감독원에서 오늘의 최신 ELS/ELB 데이터를 수집 중입니다..."):
+    df_raw, error = fetch_els_data(API_KEY)
 
-    {"카테고리": "📉 지수형 [ KI40 ]", "유형": "지수형", "증권사": "키움", "종목번호": "3816", "수익률": 11.0, "기초자산": "H/K/N", "마감일": "~01.29 (26)"},
-    {"카테고리": "📉 지수형 [ KI40 ]", "유형": "지수형", "증권사": "미래", "종목번호": "37433", "수익률": 10.6, "기초자산": "H/K/N", "마감일": "~01.28 (23)"},
-    {"카테고리": "📉 지수형 [ KI40 ]", "유형": "지수형", "증권사": "NH", "종목번호": "24414", "수익률": 9.7, "기초자산": "E/K/N", "마감일": "~02.05 (2)"},
+if error:
+    st.info(f"💡 안내: {error}")
+elif df_raw.empty:
+    st.info("현재 청약 진행 중인 상품이 없습니다.")
+else:
+    # 필요한 항목 가공
+    df_processed = pd.DataFrame({
+        "증권사": df_raw.get("kor_co_nm", "증권사 미공시"),
+        "종목명": df_raw.get("fin_prdt_nm", "상품명 미공시"),
+        "기초자산": df_raw.get("und_ast_nm", "자산 정보 참조"),
+        "제시수익률": pd.to_numeric(df_raw.get("etc_rate", 0), errors="coerce").fillna(0),
+        "낙인(KI)": df_raw.get("ki_barr", "미공시"),
+        "마감일": df_raw.get("sale_end_nd", "일정 참조")
+    })
 
-    # --- 달러 / ELB ---
-    {"카테고리": "💵 달러(USD) ELS", "유형": "달러/ELB", "증권사": "키움", "종목번호": "1742", "수익률": 24.9, "기초자산": "MU/TSLA", "마감일": "~01.29 (26)"},
-    {"카테고리": "💵 달러(USD) ELS", "유형": "달러/ELB", "증권사": "키움", "종목번호": "1743", "수익률": 20.52, "기초자산": "PLTR/TSLA", "마감일": "~01.29 (26)"},
-    {"카테고리": "💰 ELB (Digital Call)", "유형": "달러/ELB", "증권사": "키움", "종목번호": "1067", "수익률": 5.01, "기초자산": "삼성전자", "마감일": "~01.29"},
-    {"카테고리": "💰 ELB (Digital Call)", "유형": "달러/ELB", "증권사": "키움", "종목번호": "1066", "수익률": 4.21, "기초자산": "삼성전자", "마감일": "~01.29"}
-]
+    # 제시수익률 높은 순 정렬
+    df_sorted = df_processed.sort_values(by="제시수익률", ascending=False).reset_index(drop=True)
 
-df = pd.DataFrame(data)
-
-# 화면 헤더
-st.title("📢 ELS/ELB 추천 브리핑 리스트")
-st.write("주요 낙인(KI) 및 카테고리별 수익률 Top 3 상품 요약 리스트입니다.")
-
-# 2. 텍스트 브리핑 메시지 자동 생성
-medals = ["🥇", "🥈", "🥉"]
-briefing_text = "📢 [ELS 상품 추천 브리핑]\n-------------------------------------\n"
-
-categories = df["카테고리"].unique()
-
-for cat in categories:
-    briefing_text += f"\n{cat}\n"
-    cat_df = df[df["카테고리"] == cat].sort_values(by="수익률", ascending=False).reset_index(drop=True)
+    # ---------------------------------------------------------
+    # 4. 카톡/텔레그램 공유용 브리핑 텍스트 자동 생성
+    # ---------------------------------------------------------
+    medals = ["🥇", "🥈", "🥉"]
+    briefing_text = "📢 [금감원 실시간 ELS/ELB 큐레이션]\n-------------------------------------\n"
     
-    for idx, row in cat_df.iterrows():
-        medal = medals[idx] if idx < len(medals) else "▪️"
-        briefing_text += f"{medal} {row['증권사']} {row['종목번호']}({row['수익률']}%) {row['기초자산']} {row['마감일']}\n"
-
-briefing_text += "\n-------------------------------------\n⚠️ [투자 유의사항]\n본 정보는 투자 참고용이며, 법적 책임은 투자자 본인에게 있습니다."
-
-# 3. 브리핑 텍스트 박스 출력 및 복사 기능
-st.subheader("📋 카카오톡/텔레그램 공유용 리스트")
-st.code(briefing_text, language="text")
-
-# 4. 화면 시각화 영역 (카드 형태 리스트)
-st.divider()
-st.subheader("📱 화면 요약 브리핑")
-
-for cat in categories:
-    st.markdown(f"### {cat}")
-    cat_df = df[df["카테고리"] == cat].sort_values(by="수익률", ascending=False).reset_index(drop=True)
+    top_items = df_sorted.head(10) # 수익률 상위 10개 추출
     
-    for idx, row in cat_df.iterrows():
-        medal = medals[idx] if idx < len(medals) else "▪️"
-        st.write(f"{medal} **{row['증권사']} {row['종목번호']}** (`{row['수익률']}%`) | {row['기초자산']} | {row['마감일']}")
-    st.write("")
+    for idx, row in top_items.iterrows():
+        medal = medals[idx] if idx < 3 else "▪️"
+        briefing_text += f"{medal} {row['증권사']} {row['종목명']}({row['제시수익률']}%) {row['기초자산']} ~{row['마감일']}\n"
 
-# 5. 전체 데이터 표
-with st.expander("📊 전체 상품 목록 데이터 확인하기"):
-    st.dataframe(df, hide_index=True)
+    briefing_text += "\n-------------------------------------\n⚠️ [투자 유의사항]\n본 정보는 금감원 공시 데이터 기반 참고용이며, 상세조건은 증권사 청약 공모안을 확인하세요."
+
+    # ---------------------------------------------------------
+    # 5. 화면 출력
+    # ---------------------------------------------------------
+    st.subheader("📋 카카오톡 / 텔레그램 복사용 브리핑")
+    st.code(briefing_text, language="text")
+
+    st.divider()
+    st.subheader("📊 오늘의 청약 ELS/ELB 전체 리스트")
+    st.dataframe(df_sorted, use_container_width=True, hide_index=True)
