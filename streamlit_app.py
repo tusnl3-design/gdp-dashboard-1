@@ -5,27 +5,29 @@ import xml.etree.ElementTree as ET
 
 st.set_page_config(page_title="ELS 비교기", layout="wide")
 
-# 🔑 인증키 (시간이 지나면 정상 작동합니다)
-DECODED_SERVICE_KEY = "S0+zGZ9bwR8NYWqHCwXmbH2wQU9VccXjo0h2OVQIt0mrb0+DCnJZhm2oOwqTkGN+YWtVhbDZYkV4YtPUYEu4Qg=="
-
 st.title("📊 증권사별 ELS 조건 비교")
 
 @st.cache_data(ttl=3600)
 def fetch_els_data():
     base_url = "https://apis.data.go.kr/B552481/DerivesSvc/getDerivCombiIsinInfoN1"
     
-    params = {
-        "serviceKey": DECODED_SERVICE_KEY,
-        "pageNo": "1",
-        "numOfRows": "100"
-    }
+    # 💡 [핵심] 포털에 있는 '인코딩된 인증키'(%가 포함된 원본 문자열)를 그대로 사용합니다.
+    ENCODED_SERVICE_KEY = "S0%2BzGZ9bwR8NYWqHCwXmbH2wQU9VccXjo0h2OVQIt0mrb0%2BDCnJZhm2oOwqTkGN%2BYWtVhbDZYkV4YtPUYEu4Qg%3D%3D"
+    
+    # requests가 키를 다시 인코딩하지 못하도록 URL에 직접 붙여서 호출합니다.
+    full_url = f"{base_url}?serviceKey={ENCODED_SERVICE_KEY}&pageNo=1&numOfRows=100"
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
 
     try:
-        r = requests.get(base_url, params=params, headers=headers, timeout=30)
+        r = requests.get(full_url, headers=headers, timeout=30)
+
+        # 🔍 에러가 나더라도 서버가 뭐라고 응답했는지 화면에 그대로 출력
+        st.write("📌 **실제 호출된 URL:**", r.url)
+        st.write("📌 **HTTP 상태코드:**", r.status_code)
+        st.write("📌 **서버 응답 본문:**", r.text)
 
         if r.status_code != 200:
             return pd.DataFrame(), f"HTTP 오류: {r.status_code}"
@@ -70,7 +72,7 @@ def fetch_els_data():
 df, err = fetch_els_data()
 
 if err:
-    st.error(f"⚠️ {err} (※ 인증키 발급 직후라면 서버 반영까지 1~2시간 정도 소요될 수 있습니다.)")
+    st.error(f"⚠️ {err}")
 else:
     st.success(f"🎉 성공적으로 데이터를 불러왔습니다! (총 {len(df)}건)")
     st.dataframe(df, use_container_width=True, hide_index=True)
