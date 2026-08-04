@@ -11,7 +11,7 @@ today_str = datetime.now().strftime("%Y-%m-%d")
 # ---------------------------------------------------------
 # 🔑 공공데이터포털 API 설정 (발급받으신 키를 여기에 입력하세요)
 # ---------------------------------------------------------
-SERVICE_KEY = "S0%2BzGZ9bwR8NYWqHCwXmbH2wQU9VccXjo0h2OVQIt0mrb0%2BDCnJZhm2oOwqTkGN%2BYwtVhbDZYkV4YtPUYEu4Qg%3D%3D"  #
+SERVICE_KEY = "https://apis.data.go.kr/B552481/DerivesSvc"  #
 
 st.title("📊 증권사별 ELS 조건 및 수익률 실시간 비교")
 st.caption(f"📅 데이터 기준일: {today_str} | 공공데이터포털(예탁결제원) 실시간 연동")
