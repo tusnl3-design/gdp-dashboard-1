@@ -1,41 +1,156 @@
 import streamlit as st
+import pandas as pd
 import requests
+import xml.etree.ElementTree as ET
 from datetime import datetime
 
-st.set_page_config(page_title="ELS API 진단 모드", layout="wide")
+st.set_page_config(page_title="증권사별 ELS 조건 및 수익률 비교", layout="wide")
 
-st.title("🔍 ELS API 연결 상세 진단")
+today_str = datetime.now().strftime("%Y-%m-%d")
 
-# 1. 마이페이지에 있는 [Encoding 키]
-ENCODING_KEY = "S0%2BzGZ9bwR8NYWqHCwXmbH2wQU9VccXjo0h2OVQIt0mrb0%2BDCnJZhm2oOwqTkGN%2BYWtVhbDZYkV4YtPUYEu4Qg%3D%3D"
+# ---------------------------------------------------------
+# 🔑 디코딩(Decoding) 인증키 입력
+# ---------------------------------------------------------
+SERVICE_KEY = "S0+zGZ9bwR8NYWqHCwXmbH2wQU9VccXjo0h2OVQIt0mrb0+DCnJZhm2oOwqTkGN+YWtVhbDZYkV4YtPUYEu4Qg=="
 
-# 2. 마이페이지에 있는 [Decoding 키]
-DECODING_KEY = "S0+zGZ9bwR8NYWqHCwXmbH2wQU9VccXjo0h2OVQIt0mrb0+DCnJZhm2oOwqTkGN+YWtVhbDZYkV4YtPUYEu4Qg=="
+st.title("📊 증권사별 ELS 조건 및 수익률 실시간 비교")
+st.caption(f"📅 데이터 기준일: {today_str} | 공공데이터포털 실시간 연동")
 
-key_type = st.radio("테스트할 키 선택", ["1. 인코딩 키 사용 (URL 직접 포함)", "2. 디코딩 키 사용 (params 이용)"])
-
-if st.button("🚀 API 호출 테스트 실행"):
+# ---------------------------------------------------------
+# 1. API 데이터 수집 함수 (최신 엔드포인트 적용)
+# ---------------------------------------------------------
+@st.cache_data(ttl=3600)
+def fetch_els_data(service_key):
+    # 최신 활성화된 금융위원회/예탁결제원 파생결합증권 API 엔드포인트
+    url = "https://apis.data.go.kr/1160100/DerivativesInfoService/getElsIsinList"
+    
+    params = {
+        "serviceKey": service_key,
+        "pageNo": "1",
+        "numOfRows": "50",
+        "resultType": "xml"
+    }
+    
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
     
-    if "1." in key_type:
-        # 인코딩 키를 URL에 직접 결합
-        url = f"https://apis.data.go.kr/B552481/DerivesSvc/getElsOfrList?serviceKey={ENCODING_KEY}&pageNo=1&numOfRows=10"
-        res = requests.get(url, headers=headers, timeout=15)
-    else:
-        # 디코딩 키를 params로 전달
-        url = "https://apis.data.go.kr/B552481/DerivesSvc/getElsOfrList"
-        params = {
-            "serviceKey": DECODING_KEY,
-            "pageNo": "1",
-            "numOfRows": "10"
-        }
-        res = requests.get(url, params=params, headers=headers, timeout=15)
+    try:
+        response = requests.get(url, params=params, headers=headers, timeout=30)
         
-    st.write(f"**응답 상태 코드:** `{res.status_code}`")
-    st.write("**요청한 최종 URL:**")
-    st.code(res.url)
-    
-    st.write("**서버 응답 내용 (본문):**")
-    st.code(res.text, language="xml")
+        if response.status_code == 200:
+            try:
+                root = ET.fromstring(response.text)
+            except Exception:
+                return pd.DataFrame(), "API 응답 데이터 파싱 실패"
+            
+            result_code = root.find(".//resultCode")
+            result_msg = root.find(".//resultMsg")
+            
+            if result_code is not None and result_code.text != "00":
+                msg = result_msg.text if result_msg is not None else "API 호출 실패"
+                return pd.DataFrame(), f"API 오류 [{result_code.text}]: {msg}"
+            
+            items = root.findall(".//item")
+            if not items:
+                return pd.DataFrame(), "현재 등록된 ELS 상품 데이터가 없습니다."
+            
+            parsed_list = []
+            for item in items:
+                def get_txt(tag_name, default_val="-"):
+                    node = item.find(tag_name)
+                    return node.text.strip() if node is not None and node.text else default_val
+
+                sec_company = get_txt("issuCoNm", get_txt("coNm", "증권사"))
+                item_name = get_txt("isinNm", get_txt("itemNm", "ELS 상품"))
+                underlying = get_txt("kndNm", get_txt("assetNm", "지수/종목"))
+                ki = get_txt("bareAt", "50%")
+                due_date = get_txt("subEndDt", today_str)
+                
+                try:
+                    rate = float(get_txt("expYidRt", get_txt("yidRt", "0.0")))
+                except:
+                    rate = 0.0
+
+                try:
+                    ki_num = int(ki.replace("%", ""))
+                except:
+                    ki_num = 50
+
+                els_type = "종목형" if any(k in underlying for k in ["삼성", "SK", "테슬라", "엔비디아", "NAVER", "카카오", "현대"]) else "지수형"
+
+                parsed_list.append({
+                    "유형": els_type,
+                    "증권사": sec_company,
+                    "종목명": item_name,
+                    "기초자산": underlying,
+                    "낙인(KI)": ki,
+                    "KI_num": ki_num,
+                    "제시수익률(연)": rate,
+                    "청약마감일": due_date
+                })
+            
+            return pd.DataFrame(parsed_list), None
+        else:
+            return pd.DataFrame(), f"서버 연결 에러 (상태 코드: {response.status_code})"
+            
+    except requests.exceptions.Timeout:
+        return pd.DataFrame(), "공공데이터포털 서버 응답 시간이 초과되었습니다."
+    except Exception as e:
+        return pd.DataFrame(), f"연결 실패: {str(e)}"
+
+# ---------------------------------------------------------
+# 2. 데이터 불러오기 및 화면 출력
+# ---------------------------------------------------------
+with st.spinner("공공데이터포털 서버와 연동 중입니다..."):
+    df_api, error_msg = fetch_els_data(SERVICE_KEY)
+
+if error_msg or df_api.empty:
+    st.warning(f"⚠️ API 연동 안내: {error_msg if error_msg else '데이터가 없습니다.'}")
+    st.info("💡 공공데이터포털 마이페이지에서 [금융위원회_파생결합증권 상품정보] 서비스 활용 신청이 완료되어 있는지 확인해 주세요.")
+else:
+    df = df_api.copy()
+
+    # 사이드바 검색 필터
+    st.sidebar.header("⚙️ ELS 검색 필터")
+    els_type = st.sidebar.radio("📌 상품 유형 선택", ["전체", "지수형", "종목형"])
+    filtered_df = df if els_type == "전체" else df[df["유형"] == els_type].copy()
+
+    sort_option = st.sidebar.selectbox("📊 정렬 기준 선택", ["제시수익률 높은 순", "저낙인(KI) 낮은 순"])
+
+    if sort_option == "제시수익률 높은 순":
+        filtered_df = filtered_df.sort_values(by="제시수익률(연)", ascending=False)
+    else:
+        filtered_df = filtered_df.sort_values(by=["KI_num", "제시수익률(연)"], ascending=[True, False])
+
+    available_assets = list(filtered_df["기초자산"].unique())
+    selected_assets = st.sidebar.multiselect("📌 기초자산 세부 선택", options=available_assets, default=available_assets)
+
+    if selected_assets:
+        filtered_df = filtered_df[filtered_df["기초자산"].isin(selected_assets)]
+
+    section_title = f"📋 ELS 추천 리스트 - {els_type} / {sort_option}"
+
+    if not filtered_df.empty:
+        medals = ["🥇", "🥈", "🥉"]
+        briefing_text = f"📢 [{section_title}]\n📅 기준일: {today_str}\n-------------------------------------\n"
+        
+        for idx, (_, row) in enumerate(filtered_df.head(10).iterrows()):
+            medal = medals[idx] if idx < 3 else "▪️"
+            briefing_text += f"{medal} {row['증권사']} {row['종목명']} (연 {row['제시수익률(연)']}% / KI {row['낙인(KI)']}) ~{row['청약마감일']} - {row['기초자산']}\n"
+            
+        briefing_text += "\n-------------------------------------\n⚠️ [투자 유의사항]\n본 정보는 참고용이며, 상세 청약 조건은 해당 증권사를 통해 반드시 확인하세요."
+
+        st.subheader(section_title)
+        st.code(briefing_text, language="text")
+        st.divider()
+
+        top = filtered_df.iloc[0]
+        st.success(f"🏆 **[{els_type}] 선택한 기준({sort_option}) 1위:** [{top['증권사']}] {top['종목명']} — **연 {top['제시수익률(연)']}%** (낙인: {top['낙인(KI)']} / 마감: {top['청약마감일']} / 기초자산: {top['기초자산']})")
+
+        st.subheader(f"📈 증권사별 조건 비교 ({els_type})")
+        st.bar_chart(filtered_df, x="증권사", y="제시수익률(연)")
+
+        display_df = filtered_df.drop(columns=["KI_num"])
+        st.subheader("📋 상세 상품 비교 목록")
+        st.dataframe(display_df, hide_index=True, use_container_width=True)
