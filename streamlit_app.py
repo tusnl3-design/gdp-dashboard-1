@@ -3,31 +3,26 @@ import pandas as pd
 import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime
-from urllib.parse import quote
 
 st.set_page_config(page_title="증권사별 ELS 조건 및 수익률 비교", layout="wide")
 
 today_str = datetime.now().strftime("%Y-%m-%d")
 
 # ---------------------------------------------------------
-# 🔑 디코딩 키 입력 (특수문자가 포함된 디코딩 키 그대로 붙여넣기)
+# 🔑 원본 인코딩(Encoding) 키 그대로 입력 (%3D 등이 포함된 키)
 # ---------------------------------------------------------
-SERVICE_KEY = "S0+zGZ9bwR8NYWqHCwXmbH2wQU9VccXjo0h2OVQIt0mrb0+DCnJZhm2oOwqTkGN+YWtVhbDZYkV4YtPUYEu4Qg=="
+ENCODING_KEY = "S0%2BzGZ9bwR8NYWqHCwXmbH2wQU9VccXjo0h2OVQIt0mrb0%2BDCnJZhm2oOwqTkGN%2BYWtVhbDZYkV4YtPUYEu4Qg%3D%3D"
 
 st.title("📊 증권사별 ELS 조건 및 수익률 실시간 비교")
 st.caption(f"📅 데이터 기준일: {today_str} | 공공데이터포털(예탁결제원) 실시간 연동")
 
 # ---------------------------------------------------------
-# 1. API 데이터 수집 함수 (인증키 우회 변환 적용)
+# 1. API 데이터 수집 함수 (인코딩 원본 키 직접 전달)
 # ---------------------------------------------------------
 @st.cache_data(ttl=3600)
-def fetch_els_data(service_key):
-    # 키 내부의 + 및 = 기호가 변형되지 않도록 안전하게 인코딩 처리
-    encoded_key = quote(service_key, safe='')
-    
-    # URL 자체에 키를 직접 포함시키는 안전한 방식 사용
-    base_url = "https://apis.data.go.kr/B552481/DerivesSvc/getElsOfrList"
-    full_url = f"{base_url}?serviceKey={encoded_key}&pageNo=1&numOfRows=50"
+def fetch_els_data(encoding_key):
+    # 인코딩 키가 훼손되지 않도록 f-string으로 URL 조합
+    full_url = f"https://apis.data.go.kr/B552481/DerivesSvc/getElsOfrList?serviceKey={encoding_key}&pageNo=1&numOfRows=50"
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -98,10 +93,10 @@ def fetch_els_data(service_key):
         return pd.DataFrame(), f"연결 실패: {str(e)}"
 
 # ---------------------------------------------------------
-# 2. 데이터 불러오기 및 출력
+# 2. 데이터 불러오기 및 화면 출력
 # ---------------------------------------------------------
 with st.spinner("공공데이터포털 서버와 연동 중입니다..."):
-    df_api, error_msg = fetch_els_data(SERVICE_KEY)
+    df_api, error_msg = fetch_els_data(ENCODING_KEY)
 
 if error_msg or df_api.empty:
     st.warning(f"⚠️ API 연동 결과: {error_msg if error_msg else '데이터가 없습니다.'}")
