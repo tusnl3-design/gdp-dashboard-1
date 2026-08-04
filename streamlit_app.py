@@ -1,13 +1,17 @@
 import streamlit as st
 import pandas as pd
+from datetime import datetime
 
 st.set_page_config(page_title="증권사별 ELS 조건 및 수익률 비교", layout="wide")
 
+# 당일 기준일 자동 생성
+today_str = datetime.now().strftime("%Y-%m-%d")
+
 st.title("📊 증권사별 ELS 조건 및 수익률 실시간 비교")
-st.write("지수형 및 종목형 ELS 상품의 수익률, 낙인(KI) 조건, 청약마감일을 한눈에 비교합니다.")
+st.caption(f"📅 데이터 기준일: {today_str} | 지수형 및 종목형 ELS 상품의 수익률, 낙인(KI) 조건, 청약마감일을 한눈에 비교합니다.")
 
 # ---------------------------------------------------------
-# 1. ELS 데이터 준비 (청약마감일 항목 추가)
+# 1. ELS 데이터 준비 (청약마감일 항목 포함)
 # ---------------------------------------------------------
 data = [
     # --- 지수형 ELS ---
@@ -57,12 +61,15 @@ selected_assets = st.sidebar.multiselect("📌 기초자산 세부 선택", opti
 if selected_assets:
     filtered_df = filtered_df[filtered_df["기초자산"].isin(selected_assets)]
 
+# 동적 헤더 타이틀 생성
+section_title = f"📋 ELS 추천 리스트 - {els_type} / {sort_option}"
+
 # ---------------------------------------------------------
-# 3. 📋 ELS 추천 리스트 - 지수형 / 낙인(KI) 낮은 순 (마감일 포함)
+# 3. 📋 브리핑 상자 (헤더 명칭 변경 및 데이터 기준일 표기)
 # ---------------------------------------------------------
 if not filtered_df.empty:
     medals = ["🥇", "🥈", "🥉"]
-    briefing_text = f"📢 [ELS 추천 리스트 - {els_type} / {sort_option}]\n-------------------------------------\n"
+    briefing_text = f"📢 [{section_title}]\n📅 기준일: {today_str}\n-------------------------------------\n"
     
     for idx, (_, row) in enumerate(filtered_df.head(10).iterrows()):
         medal = medals[idx] if idx < 3 else "▪️"
@@ -70,7 +77,8 @@ if not filtered_df.empty:
         
     briefing_text += "\n-------------------------------------\n⚠️ [투자 유의사항]\n본 정보는 참고용이며, 상세 청약 조건은 해당 증권사를 통해 반드시 확인하세요."
 
-    st.subheader("📋 카카오톡 / 텔레그램 복사용 브리핑")
+    # 요구사항 반영: 요청하신 제목으로 교체
+    st.subheader(section_title)
     st.code(briefing_text, language="text")
     st.divider()
 
