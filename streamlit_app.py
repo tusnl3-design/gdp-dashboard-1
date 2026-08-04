@@ -1,151 +1,39 @@
 import streamlit as st
 import pandas as pd
-import math
-from pathlib import Path
 
-# Set the title and favicon that appear in the Browser's tab bar.
-st.set_page_config(
-    page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
-)
+# 페이지 설정
+st.set_page_config(page_title="ELS 증권사별 실시간 비교", page_layout="wide")
 
-# -----------------------------------------------------------------------------
-# Declare some useful functions.
+st.title("📊 증권사별 ELS 조건 및 수익률 실시간 비교")
+st.write("동일 조건(기초자산, 낙인) 대비 가장 수익률이 높은 증권사 ELS를 비교합니다.")
 
-@st.cache_data
-def get_gdp_data():
-    """Grab GDP data from a CSV file.
+# 사이드바 설정
+st.sidebar.header("⚙️ ELS 조건 필터")
 
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
-    """
-
-    # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
-
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
-
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
-    )
-
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
-
-    return gdp_df
-
-gdp_df = get_gdp_data()
-
-# -----------------------------------------------------------------------------
-# Draw the actual page
-
-# Set the title that appears at the top of the page.
-'''
-# :earth_americas: GDP dashboard
-
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
-'''
-
-# Add some spacing
-''
-''
-
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
-
-from_year, to_year = st.slider(
-    'Which years are you interested in?',
-    min_value=min_value,
-    max_value=max_value,
-    value=[min_value, max_value])
-
-countries = gdp_df['Country Code'].unique()
-
-if not len(countries):
-    st.warning("Select at least one country")
-
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
-
-''
-''
-''
-
-# Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
+# 비교 데이터
+data = [
+    {"증권사": "미래에셋증권", "종목명": "미래에셋 ELS 31200호", "기초자산": "S&P500 / EuroStoxx50 / Nikkei225", "조기상환배리어": "85-85-80-75-70-65", "낙인(KI)": "45%", "제시수익률(연)": 8.50, "가성비점수": 96},
+    {"증권사": "한국투자증권", "종목명": "한투 ELS 15840호", "기초자산": "S&P500 / EuroStoxx50 / Nikkei225", "조기상환배리어": "85-85-80-75-70-65", "낙인(KI)": "45%", "제시수익률(연)": 8.10, "가성비점수": 90},
+    {"증권사": "삼성증권", "종목명": "삼성 ELS 29410호", "기초자산": "S&P500 / EuroStoxx50 / Nikkei225", "조기상환배리어": "85-85-80-75-70-65", "낙인(KI)": "45%", "제시수익률(연)": 7.80, "가성비점수": 84},
+    {"증권사": "KB증권", "종목명": "KB ELS 2410호", "기초자산": "S&P500 / EuroStoxx50 / KOSPI200", "조기상환배리어": "90-85-80-75-70-65", "낙인(KI)": "50%", "제시수익률(연)": 9.20, "가성비점수": 88},
+    {"증권사": "NH투자증권", "종목명": "NH QV ELS 21900호", "기초자산": "S&P500 / EuroStoxx50 / KOSPI200", "조기상환배리어": "90-85-80-75-70-65", "낙인(KI)": "50%", "제시수익률(연)": 8.80, "가성비점수": 82},
+    {"증권사": "신한투자증권", "종목명": "신한 ELS 22400호", "기초자산": "S&P500 / EuroStoxx50 / Nikkei225", "조기상환배리어": "80-80-80-75-70-60", "낙인(KI)": "40%", "제시수익률(연)": 6.90, "가성비점수": 92}
 ]
 
-st.header('GDP over time', divider='gray')
+df = pd.DataFrame(data)
 
-''
+# 필터링
+assets = st.sidebar.multiselect("📌 기초자산 선택", options=df["기초자산"].unique(), default=df["기초자산"].unique())
+filtered_df = df[df["기초자산"].isin(assets)].sort_values(by="제시수익률(연)", ascending=False)
 
-st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
-)
+# 1위 하이라이트
+if not filtered_df.empty:
+    top = filtered_df.iloc[0]
+    st.success(f"🏆 **현재 검색 조건 수익률 1위:** [{top['증권사']}] {top['종목명']} — **연 {top['제시수익률(연)']}%** (낙인: {top['낙인(KI)']})")
 
-''
-''
+# 그래프 및 표
+st.subheader("📈 증권사별 제시 수익률 비교")
+st.bar_chart(filtered_df, x="증권사", y="제시수익률(연)")
 
-
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
-
-st.header(f'GDP in {to_year}', divider='gray')
-
-''
-
-cols = st.columns(4)
-
-for i, country in enumerate(selected_countries):
-    col = cols[i % len(cols)]
-
-    with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-
-        if math.isnan(first_gdp):
-            growth = 'n/a'
-            delta_color = 'off'
-        else:
-            growth = f'{last_gdp / first_gdp:,.2f}x'
-            delta_color = 'normal'
-
-        st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
-            delta=growth,
-            delta_color=delta_color
-        )
+st.subheader("📋 상세 상품 비교 목록")
+st.dataframe(filtered_df, use_container_width=True, hide_index=True)
