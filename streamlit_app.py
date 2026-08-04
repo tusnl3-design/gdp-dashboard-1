@@ -3,13 +3,14 @@ import pandas as pd
 import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime
+from urllib.parse import quote
 
 st.set_page_config(page_title="증권사별 ELS 조건 및 수익률 비교", layout="wide")
 
 today_str = datetime.now().strftime("%Y-%m-%d")
 
 # ---------------------------------------------------------
-# 🔑 디코딩(Decoding) 인증키 입력
+# 🔑 디코딩 키 입력 (특수문자가 포함된 디코딩 키 그대로 붙여넣기)
 # ---------------------------------------------------------
 SERVICE_KEY = "S0+zGZ9bwR8NYWqHCwXmbH2wQU9VccXjo0h2OVQIt0mrb0+DCnJZhm2oOwqTkGN+YWtVhbDZYkV4YtPUYEu4Qg=="
 
@@ -17,38 +18,36 @@ st.title("📊 증권사별 ELS 조건 및 수익률 실시간 비교")
 st.caption(f"📅 데이터 기준일: {today_str} | 공공데이터포털(예탁결제원) 실시간 연동")
 
 # ---------------------------------------------------------
-# 1. API 데이터 수집 함수 (타임아웃 30초 및 예외처리 강화)
+# 1. API 데이터 수집 함수 (인증키 우회 변환 적용)
 # ---------------------------------------------------------
 @st.cache_data(ttl=3600)
 def fetch_els_data(service_key):
-    url = "https://apis.data.go.kr/B552481/DerivesSvc/getElsOfrList"
+    # 키 내부의 + 및 = 기호가 변형되지 않도록 안전하게 인코딩 처리
+    encoded_key = quote(service_key, safe='')
     
-    params = {
-        "serviceKey": service_key,
-        "pageNo": "1",
-        "numOfRows": "50"
-    }
+    # URL 자체에 키를 직접 포함시키는 안전한 방식 사용
+    base_url = "https://apis.data.go.kr/B552481/DerivesSvc/getElsOfrList"
+    full_url = f"{base_url}?serviceKey={encoded_key}&pageNo=1&numOfRows=50"
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     
     try:
-        # 타임아웃을 30초로 넉넉하게 연장
-        response = requests.get(url, params=params, headers=headers, timeout=30)
+        response = requests.get(full_url, headers=headers, timeout=30)
         
         if response.status_code == 200:
             try:
                 root = ET.fromstring(response.text)
             except Exception:
-                return pd.DataFrame(), "API 응답 데이터(XML) 파싱 실패"
+                return pd.DataFrame(), f"XML 파싱 실패 (응답 내용: {response.text[:100]}...)"
             
             result_code = root.find(".//resultCode")
             result_msg = root.find(".//resultMsg")
             
             if result_code is not None and result_code.text != "00":
-                msg = result_msg.text if result_msg is not None else "알 수 없는 오류"
-                return pd.DataFrame(), f"API 오류 ({result_code.text}): {msg}"
+                msg = result_msg.text if result_msg is not None else "인증 실패"
+                return pd.DataFrame(), f"API 오류 [{result_code.text}]: {msg}"
             
             items = root.findall(".//item")
             if not items:
@@ -91,22 +90,22 @@ def fetch_els_data(service_key):
             
             return pd.DataFrame(parsed_list), None
         else:
-            return pd.DataFrame(), f"서버 응답 오류 (상태 코드: {response.status_code})"
+            return pd.DataFrame(), f"서버 연결 에러 (상태 코드: {response.status_code})"
             
     except requests.exceptions.Timeout:
-        return pd.DataFrame(), "공공데이터포털 서버 응답 시간이 초과되었습니다 (30초). 잠시 후 다시 새로고침해 주세요."
+        return pd.DataFrame(), "공공데이터포털 서버 응답 시간이 초과되었습니다 (30초). 잠시 후 새로고침해 보세요."
     except Exception as e:
         return pd.DataFrame(), f"연결 실패: {str(e)}"
 
 # ---------------------------------------------------------
 # 2. 데이터 불러오기 및 출력
 # ---------------------------------------------------------
-with st.spinner("공공데이터포털 서버 연결 중... (최대 30초 소요될 수 있습니다)"):
+with st.spinner("공공데이터포털 서버와 연동 중입니다..."):
     df_api, error_msg = fetch_els_data(SERVICE_KEY)
 
 if error_msg or df_api.empty:
-    st.warning(f"⚠️ API 연동 안내: {error_msg if error_msg else '데이터가 없습니다.'}")
-    st.info("💡 공공데이터포털 서버 지연일 수 있으니 10~20초 뒤 웹페이지를 새로고침(F5)해 보세요.")
+    st.warning(f"⚠️ API 연동 결과: {error_msg if error_msg else '데이터가 없습니다.'}")
+    st.info("💡 공공데이터포털 활용 신청 '승인' 직후라면 시스템 등록까지 약 1~2시간 지연이 발생할 수 있습니다.")
 else:
     df = df_api.copy()
 
