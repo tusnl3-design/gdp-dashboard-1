@@ -5,15 +5,15 @@ import xml.etree.ElementTree as ET
 
 st.set_page_config(page_title="ELS 비교기", layout="wide")
 
-# 🔑 보내주신 올바른 인코딩 인증키
+# 🔑 올려주신 화면의 인코딩 인증키 그대로 사용
 ENCODED_SERVICE_KEY = "S0%2BzGZ9bwR8NYWqHCwXmbH2wQU9VccXjo0h2OVQIt0mrb0%2BDCnJZhm2oOwqTkGN%2BYWtVhbDZYkV4YtPUYEu4Qg%3D%3D"
 
 st.title("📊 증권사별 ELS 조건 비교")
 
 @st.cache_data(ttl=3600)
 def fetch_els_data():
-    # 🔥 한국예탁결제원_파생결합증권정보서비스_GW 공식 Base URL 및 오퍼레이션
-    base_url = "https://apis.data.go.kr/B552481/DerivesSvc/getElsDlsIsinByNmN1"
+    # 🔥 캡처 화면에 나온 정확한 End Point와 3번 오퍼레이션 기능명 적용
+    base_url = "https://apis.data.go.kr/B552481/DerivesSvc/getDerivCombiIsinInfoN1"
     
     full_url = f"{base_url}?serviceKey={ENCODED_SERVICE_KEY}&pageNo=1&numOfRows=100"
 
