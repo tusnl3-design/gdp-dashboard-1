@@ -12,10 +12,13 @@ st.title("📊 증권사별 ELS 조건 비교")
 
 @st.cache_data(ttl=3600)
 def fetch_els_data():
-    base_url = "https://apis.data.go.kr/B552481/DerivesSvc/getDerivCombiIsinInfo"
-    
-    # 🔥 핵심: params를 쓰지 않고 인코딩 키를 URL에 직접 만듭니다 (requests 인코딩 변형 방지)
-    full_url = f"{base_url}?serviceKey={ENCODED_SERVICE_KEY}&pageNo=1&numOfRows=100"
+base_url = "https://apis.data.go.kr/B552481/DerivesSvc/getDerivCombiIsinInfo"
+
+full_url = (
+    f"{base_url}?serviceKey={ENCODED_SERVICE_KEY}"
+    f"&pageNo=1"
+    f"&numOfRows=100"
+)
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
