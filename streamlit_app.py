@@ -1,11 +1,15 @@
 import streamlit as st
 import pandas as pd
 import requests
+import urllib.parse
 
 # ---------------------------------------------------------
 # 1. 금융감독원 Open API 인증키 설정
 # ---------------------------------------------------------
-API_KEY = "S0%2BzGZ9bwR8NYWqHCwXmbH2wQU9VccXjo0h2OVQIt0mrb0%2BDCnJZhm2oOwqTkGN%2BYwtVhbDZYkV4YtPUYEu4Qg%3D%3D"
+RAW_API_KEY = "S0%2BzGZ9bwR8NYWqHCwXmbH2wQU9VccXjo0h2OVQIt0mrb0%2BDCnJZhm2oOwqTkGN%2BYwtVhbDZYkV4YtPUYEu4Qg%3D%3D"
+
+# 특수문자(%2B 등) 디코딩 처리
+API_KEY = urllib.parse.unquote(RAW_API_KEY)
 
 st.set_page_config(page_title="실시간 ELS/ELB 큐레이터", layout="wide")
 
@@ -18,11 +22,21 @@ st.caption("금융감독원 통합공시 API를 통해 매일 청약 중인 실�
 @st.cache_data(ttl=3600)  # 1시간마다 데이터 자동 갱신
 def fetch_els_data(api_key):
     # 금융감독원 파생결합증권(ELS) 상품 조회 API URL
-    url = f"http://finlife.fss.or.kr/finlifeapi/elsOptionSearch.json?auth={api_key}&topFinGrpNo=060000&pageNo=1"
+    url = "http://finlife.fss.or.kr/finlifeapi/elsOptionSearch.json"
+    params = {
+        "auth": api_key,
+        "topFinGrpNo": "060000",
+        "pageNo": "1"
+    }
     
     try:
-        response = requests.get(url, timeout=10)
-        data = response.json()
+        response = requests.get(url, params=params, timeout=10)
+        
+        # 응답이 JSON인지 확인
+        try:
+            data = response.json()
+        except Exception:
+            return pd.DataFrame(), f"API 응답 형식 오류 (HTTP 상태코드: {response.status_code}). 인증키 승인 상태를 확인해 주세요."
         
         # API 정상 응답 확인
         if data.get("result", {}).get("err_cd") == "000":
@@ -36,6 +50,8 @@ def fetch_els_data(api_key):
             if not df_base.empty and not df_option.empty:
                 merged = pd.merge(df_base, df_option, on="fin_prdt_cd", how="inner")
                 return merged, None
+            elif not df_base.empty:
+                return df_base, None
             else:
                 return pd.DataFrame(), "현재 청약 가능 기간인 ELS/ELB 상품이 없거나 공시 전입니다."
         else:
@@ -56,7 +72,7 @@ if error:
 elif df_raw.empty:
     st.info("현재 청약 진행 중인 상품이 없습니다.")
 else:
-    # 필요한 항목 가공
+    # 필요한 항목 가공 (칼럼이 없는 경우 안전하게 처리)
     df_processed = pd.DataFrame({
         "증권사": df_raw.get("kor_co_nm", "증권사 미공시"),
         "종목명": df_raw.get("fin_prdt_nm", "상품명 미공시"),
