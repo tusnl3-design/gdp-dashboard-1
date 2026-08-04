@@ -1,130 +1,107 @@
 import streamlit as st
 import pandas as pd
 import requests
-import json
+import xml.etree.ElementTree as ET
 from datetime import datetime
 
 st.set_page_config(page_title="증권사별 ELS 조건 및 수익률 비교", layout="wide")
 
 today_str = datetime.now().strftime("%Y-%m-%d")
 
-# 🔑 공공데이터포털 [Encoding 키] 또는 [Decoding 키] 원본 입력
-SERVICE_KEY = "S0%2BzGZ9bwR8NYWqHCwXmbH2wQU9VccXjo0h2OVQIt0mrb0%2BDCnJZhm2oOwqTkGN%2BYWtVhbDZYkV4YtPUYEu4Qg%3D%3D"
+# ---------------------------------------------------------
+# 🔑 디코딩(Decoding) 키 입력
+# ---------------------------------------------------------
+SERVICE_KEY = "S0+zGZ9bwR8NYWqHCwXmbH2wQU9VccXjo0h2OVQIt0mrb0+DCnJZhm2oOwqTkGN+YWtVhbDZYkV4YtPUYEu4Qg=="
 
 st.title("📊 증권사별 ELS 조건 및 수익률 실시간 비교")
 st.caption(f"📅 데이터 기준일: {today_str} | 한국예탁결제원(GW) 실시간 연동")
 
 # ---------------------------------------------------------
-# 1. API 데이터 수집 함수 (GW 우회 및 안정화 처리)
+# 1. API 데이터 수집 함수 (GW 전용 N1 규격 적용)
 # ---------------------------------------------------------
 @st.cache_data(ttl=3600)
 def fetch_els_data(service_key):
-    # 키에 %가 포함되어 있다면 이미 인코딩된 키, 아니면 디코딩 키
-    clean_key = service_key.strip()
+    # 예탁결제원 파생결합증권정보서비스_GW 규격 URL
+    url = "https://apis.data.go.kr/B552481/DerivesSvc/getDerivCombiIsinInfoN1"
     
-    # 예탁결제원 GW API 주소
-    base_url = "https://apis.data.go.kr/B553540/DerivCombSecInfoService/getElsOfrList"
-    
-    # GW 규격 맞춤 URL 직조 (requests params 자동 변환으로 인한 400 에러 방지)
-    full_url = f"{base_url}?serviceKey={clean_key}&pageNo=1&numOfRows=50&resultType=json"
+    params = {
+        "serviceKey": service_key,
+        "pageNo": "1",
+        "numOfRows": "50"
+    }
     
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "*/*"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
     
     try:
-        response = requests.get(full_url, headers=headers, timeout=30)
+        response = requests.get(url, params=params, headers=headers, timeout=30)
         
-        # 만약 JSON 요청이 400 에러가 나면 XML 규격으로 재시도
-        if response.status_code == 400:
-            full_url_xml = f"{base_url}?serviceKey={clean_key}&pageNo=1&numOfRows=50"
-            response = requests.get(full_url_xml, headers=headers, timeout=30)
-
         if response.status_code == 200:
-            # JSON 응답 시도
             try:
-                data = response.json()
-                items = data.get("response", {}).get("body", {}).get("items", {}).get("item", [])
-                
-                if isinstance(items, dict): # 단일 아이템일 경우 리스트화
-                    items = [items]
-                    
-                if not items:
-                    return pd.DataFrame(), "현재 공모 중인 ELS 상품 데이터가 없습니다."
-                
-                parsed_list = []
-                for item in items:
-                    sec_company = item.get("issuCoNm", "증권사")
-                    item_name = item.get("isinNm", "ELS 상품")
-                    underlying = item.get("kndNm", "지수/종목")
-                    ki = str(item.get("bareAt", "50%"))
-                    due_date = str(item.get("subEndDt", today_str))
-                    
-                    try:
-                        rate = float(item.get("expYidRt", 0.0))
-                    except:
-                        rate = 0.0
-
-                    try:
-                        ki_num = int(ki.replace("%", ""))
-                    except:
-                        ki_num = 50
-
-                    els_type = "종목형" if any(k in underlying for k in ["삼성", "SK", "테슬라", "엔비디아", "NAVER", "카카오", "현대"]) else "지수형"
-
-                    parsed_list.append({
-                        "유형": els_type,
-                        "증권사": sec_company,
-                        "종목명": item_name,
-                        "기초자산": underlying,
-                        "낙인(KI)": ki,
-                        "KI_num": ki_num,
-                        "제시수익률(연)": rate,
-                        "청약마감일": due_date
-                    })
-                
-                return pd.DataFrame(parsed_list), None
-
+                root = ET.fromstring(response.text)
             except Exception:
-                # JSON 변환 실패 시 XML 구조 분석 fallback
-                import xml.etree.ElementTree as ET
+                return pd.DataFrame(), f"XML 해석 실패 (응답 내용: {response.text[:100]}...)"
+            
+            result_code = root.find(".//resultCode")
+            result_msg = root.find(".//resultMsg")
+            
+            if result_code is not None and result_code.text != "00":
+                msg = result_msg.text if result_msg is not None else "API 연결 오류"
+                return pd.DataFrame(), f"API 오류 [{result_code.text}]: {msg}"
+            
+            items = root.findall(".//item")
+            if not items:
+                return pd.DataFrame(), "현재 조회된 ELS 종목 데이터가 없습니다."
+            
+            parsed_list = []
+            for item in items:
+                def get_txt(tag_name, default_val="-"):
+                    node = item.find(tag_name)
+                    return node.text.strip() if node is not None and node.text else default_val
+
+                sec_company = get_txt("issuCoNm", "증권사")
+                item_name = get_txt("isinNm", "ELS 상품")
+                underlying = get_txt("kndNm", "지수/종목")
+                ki = get_txt("bareAt", "50%")
+                due_date = get_txt("subEndDt", today_str)
+                
                 try:
-                    root = ET.fromstring(response.text)
-                    items = root.findall(".//item")
-                    
-                    if not items:
-                        return pd.DataFrame(), "현재 등록된 ELS 데이터가 없습니다."
-                        
-                    parsed_list = []
-                    for item in items:
-                        def get_txt(tag, default="-"):
-                            node = item.find(tag)
-                            return node.text.strip() if node is not None and node.text else default
-                            
-                        parsed_list.append({
-                            "유형": "지수형",
-                            "증권사": get_txt("issuCoNm"),
-                            "종목명": get_txt("isinNm"),
-                            "기초자산": get_txt("kndNm"),
-                            "낙인(KI)": get_txt("bareAt"),
-                            "KI_num": 50,
-                            "제시수익률(연)": float(get_txt("expYidRt", "0.0") if get_txt("expYidRt", "0.0").replace(".","").isdigit() else 0.0),
-                            "청약마감일": get_txt("subEndDt")
-                        })
-                    return pd.DataFrame(parsed_list), None
-                except Exception as e:
-                    return pd.DataFrame(), f"응답 해석 실패: {str(e)}"
+                    rate = float(get_txt("expYidRt", "0.0"))
+                except:
+                    rate = 0.0
+
+                try:
+                    ki_num = int(ki.replace("%", ""))
+                except:
+                    ki_num = 50
+
+                els_type = "종목형" if any(k in underlying for k in ["삼성", "SK", "테슬라", "엔비디아", "NAVER", "카카오", "현대"]) else "지수형"
+
+                parsed_list.append({
+                    "유형": els_type,
+                    "증권사": sec_company,
+                    "종목명": item_name,
+                    "기초자산": underlying,
+                    "낙인(KI)": ki,
+                    "KI_num": ki_num,
+                    "제시수익률(연)": rate,
+                    "청약마감일": due_date
+                })
+            
+            return pd.DataFrame(parsed_list), None
         else:
             return pd.DataFrame(), f"서버 연결 에러 (상태 코드: {response.status_code})"
             
+    except requests.exceptions.Timeout:
+        return pd.DataFrame(), "공공데이터포털 서버 응답 시간이 초과되었습니다."
     except Exception as e:
         return pd.DataFrame(), f"연결 실패: {str(e)}"
 
 # ---------------------------------------------------------
 # 2. 데이터 불러오기 및 화면 출력
 # ---------------------------------------------------------
-with st.spinner("공공데이터포털 GW 서버와 연동 중입니다..."):
+with st.spinner("예탁결제원 GW 서버에서 최신 ELS 데이터를 불러오는 중입니다..."):
     df_api, error_msg = fetch_els_data(SERVICE_KEY)
 
 if error_msg or df_api.empty:
