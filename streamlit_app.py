@@ -9,60 +9,74 @@ st.set_page_config(page_title="증권사별 ELS 조건 및 수익률 비교", la
 today_str = datetime.now().strftime("%Y-%m-%d")
 
 # ---------------------------------------------------------
-# 🔑 공공데이터포털 API 설정 (발급받으신 키를 여기에 입력하세요)
+# 🔑 디코딩(Decoding) 인증키 입력
 # ---------------------------------------------------------
-SERVICE_KEY = "https://apis.data.go.kr/B552481/DerivesSvc"
+SERVICE_KEY = "S0+zGZ9bwR8NYWqHCwXmbH2wQU9VccXjo0h2OVQIt0mrb0+DCnJZhm2oOwqTkGN+YWtVhbDZYkV4YtPUYEu4Qg=="
 
 st.title("📊 증권사별 ELS 조건 및 수익률 실시간 비교")
 st.caption(f"📅 데이터 기준일: {today_str} | 공공데이터포털(예탁결제원) 실시간 연동")
 
 # ---------------------------------------------------------
-# 1. API 데이터 자동 수집 함수
+# 1. API 데이터 수집 함수 (타임아웃 30초 및 예외처리 강화)
 # ---------------------------------------------------------
-@st.cache_data(ttl=3600)  # 1시간마다 데이터 자동 갱신
-def fetch_els_data_from_api(service_key):
-    # 예탁결제원 ELS 공모상품 조회 API URL
-    url = "http://apis.data.go.kr/1160100/service/GetSecuritiesInfoService/getElsSecuritiesInfo"
+@st.cache_data(ttl=3600)
+def fetch_els_data(service_key):
+    url = "https://apis.data.go.kr/B552481/DerivesSvc/getElsOfrList"
     
     params = {
         "serviceKey": service_key,
-        "numOfRows": "50",
         "pageNo": "1",
-        "resultType": "json"
+        "numOfRows": "50"
     }
     
-    # Streamlit Cloud 차단 우회용 헤더
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     
     try:
-        response = requests.get(url, params=params, headers=headers, timeout=10)
+        # 타임아웃을 30초로 넉넉하게 연장
+        response = requests.get(url, params=params, headers=headers, timeout=30)
         
         if response.status_code == 200:
-            data = response.json()
-            items = data.get("response", {}).get("body", {}).get("items", {}).get("item", [])
+            try:
+                root = ET.fromstring(response.text)
+            except Exception:
+                return pd.DataFrame(), "API 응답 데이터(XML) 파싱 실패"
             
+            result_code = root.find(".//resultCode")
+            result_msg = root.find(".//resultMsg")
+            
+            if result_code is not None and result_code.text != "00":
+                msg = result_msg.text if result_msg is not None else "알 수 없는 오류"
+                return pd.DataFrame(), f"API 오류 ({result_code.text}): {msg}"
+            
+            items = root.findall(".//item")
             if not items:
-                return pd.DataFrame(), "현재 공모 중인 ELS 데이터가 없습니다."
+                return pd.DataFrame(), "현재 공모 중인 ELS 상품 데이터가 없습니다."
             
             parsed_list = []
             for item in items:
-                # API 응답 필드 매핑
-                sec_company = item.get("issuCoNm", "미지정")      # 발행사
-                item_name = item.get("secnNm", "ELS 상품")         # 종목명
-                rate = float(item.get("yieldRt", 0.0))             # 제시수익률
-                ki = item.get("bareAt", "50%")                     # 낙인(KI)
-                due_date = item.get("subEndDt", today_str)         # 청약마감일
-                underlying = item.get("astNm", "지수/종목")        # 기초자산
+                def get_txt(tag_name, default_val="-"):
+                    node = item.find(tag_name)
+                    return node.text.strip() if node is not None and node.text else default_val
+
+                sec_company = get_txt("issuCoNm", "증권사")
+                item_name = get_txt("isinNm", "ELS 상품")
+                underlying = get_txt("kndNm", "지수/종목")
+                ki = get_txt("bareAt", "50%")
+                due_date = get_txt("subEndDt", today_str)
                 
-                # 지수형 / 종목형 자동 분류
-                els_type = "종목형" if any(k in underlying for k in ["삼성", "SK", "테슬라", "엔비디아", "NAVER", "카카오", "현대"]) else "지수형"
-                
+                try:
+                    rate = float(get_txt("expYidRt", "0.0"))
+                except:
+                    rate = 0.0
+
                 try:
                     ki_num = int(ki.replace("%", ""))
                 except:
                     ki_num = 50
+
+                els_type = "종목형" if any(k in underlying for k in ["삼성", "SK", "테슬라", "엔비디아", "NAVER", "카카오", "현대"]) else "지수형"
 
                 parsed_list.append({
                     "유형": els_type,
@@ -77,29 +91,27 @@ def fetch_els_data_from_api(service_key):
             
             return pd.DataFrame(parsed_list), None
         else:
-            return pd.DataFrame(), f"API 응답 에러 (코드: {response.status_code})"
+            return pd.DataFrame(), f"서버 응답 오류 (상태 코드: {response.status_code})"
             
+    except requests.exceptions.Timeout:
+        return pd.DataFrame(), "공공데이터포털 서버 응답 시간이 초과되었습니다 (30초). 잠시 후 다시 새로고침해 주세요."
     except Exception as e:
-        return pd.DataFrame(), f"API 연결 중 오류 발생: {str(e)}"
+        return pd.DataFrame(), f"연결 실패: {str(e)}"
 
 # ---------------------------------------------------------
-# 2. 데이터 불러오기
+# 2. 데이터 불러오기 및 출력
 # ---------------------------------------------------------
-with st.spinner("공공데이터포털에서 최신 ELS 정보를 불러오는 중입니다..."):
-    df_api, error_msg = fetch_els_data_from_api(SERVICE_KEY)
+with st.spinner("공공데이터포털 서버 연결 중... (최대 30초 소요될 수 있습니다)"):
+    df_api, error_msg = fetch_els_data(SERVICE_KEY)
 
-# API 성공 여부에 따른 처리
 if error_msg or df_api.empty:
-    st.warning(f"⚠️ 실시간 API 연동 안내: {error_msg if error_msg else '데이터가 없습니다.'}")
-    st.info("💡 API 키를 코드 상단의 `SERVICE_KEY`에 올바르게 입력했는지 확인해 주세요.")
+    st.warning(f"⚠️ API 연동 안내: {error_msg if error_msg else '데이터가 없습니다.'}")
+    st.info("💡 공공데이터포털 서버 지연일 수 있으니 10~20초 뒤 웹페이지를 새로고침(F5)해 보세요.")
 else:
     df = df_api.copy()
 
-    # ---------------------------------------------------------
-    # 3. 사이드바 검색 옵션
-    # ---------------------------------------------------------
+    # 사이드바 검색 필터
     st.sidebar.header("⚙️ ELS 검색 필터")
-
     els_type = st.sidebar.radio("📌 상품 유형 선택", ["전체", "지수형", "종목형"])
     filtered_df = df if els_type == "전체" else df[df["유형"] == els_type].copy()
 
@@ -118,9 +130,7 @@ else:
 
     section_title = f"📋 ELS 추천 리스트 - {els_type} / {sort_option}"
 
-    # ---------------------------------------------------------
-    # 4. 브리핑 상자 & 화면 출력
-    # ---------------------------------------------------------
+    # 브리핑 상자 & 상세 화면
     if not filtered_df.empty:
         medals = ["🥇", "🥈", "🥉"]
         briefing_text = f"📢 [{section_title}]\n📅 기준일: {today_str}\n-------------------------------------\n"
