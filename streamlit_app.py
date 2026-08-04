@@ -1,4 +1,3 @@
-```python
 import streamlit as st
 import pandas as pd
 import requests
@@ -71,4 +70,3 @@ if err:
 else:
     st.success(f"조회 성공: {len(df)}건")
     st.dataframe(df, use_container_width=True)
-```
