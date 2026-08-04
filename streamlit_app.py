@@ -5,24 +5,29 @@ import xml.etree.ElementTree as ET
 
 st.set_page_config(page_title="ELS 비교기", layout="wide")
 
-# 🔑 올려주신 화면의 인코딩 인증키 그대로 사용
-ENCODED_SERVICE_KEY = "S0%2BzGZ9bwR8NYWqHCwXmbH2wQU9VccXjo0h2OVQIt0mrb0%2BDCnJZhm2oOwqTkGN%2BYWtVhbDZYkV4YtPUYEu4Qg%3D%3D"
+# 🔑 [중요] 공공데이터포털에서 복사해온 순수 디코딩 인증키 원문 그대로 입력
+DECODED_SERVICE_KEY = "S0+zGZ9bwR8NYWqHCwXmbH2wQU9VccXjo0h2OVQIt0mrb0+DCnJZhm2oOwqTkGN+YWtVhbDZYkV4YtPUYEu4Qg=="
 
 st.title("📊 증권사별 ELS 조건 비교")
 
 @st.cache_data(ttl=3600)
 def fetch_els_data():
-    # 🔥 캡처 화면에 나온 정확한 End Point와 3번 오퍼레이션 기능명 적용
     base_url = "https://apis.data.go.kr/B552481/DerivesSvc/getDerivCombiIsinInfoN1"
     
-    full_url = f"{base_url}?serviceKey={ENCODED_SERVICE_KEY}&pageNo=1&numOfRows=100"
+    # requests의 params 기능을 쓰면 포털 규격에 맞게 자동으로 안전하게 인코딩됩니다.
+    params = {
+        "serviceKey": DECODED_SERVICE_KEY,
+        "pageNo": "1",
+        "numOfRows": "100"
+    }
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
 
     try:
-        r = requests.get(full_url, headers=headers, timeout=30)
+        # URL 직접 조립 대신 params 전달 방식 사용
+        r = requests.get(base_url, params=params, headers=headers, timeout=30)
 
         st.write("📌 **실제 호출된 URL:**", r.url)
         st.write("📌 **HTTP 상태코드:**", r.status_code)
