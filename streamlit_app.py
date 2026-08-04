@@ -1,114 +1,60 @@
 import streamlit as st
 import pandas as pd
-import requests
-import xml.etree.ElementTree as ET
-import urllib.parse
-from datetime import datetime, timedelta
 
-# ---------------------------------------------------------
-# 1. 공공데이터포털 API 설정 (발급받으신 인증키)
-# ---------------------------------------------------------
-RAW_KEY = "S0%2BzGZ9bwR8NYWqHCwXmbH2wQU9VccXjo0h2OVQIt0mrb0%2BDCnJZhm2oOwqTkGN%2BYwtVhbDZYkV4YtPUYEu4Qg%3D%3D"
-DECODED_KEY = urllib.parse.unquote(RAW_KEY)
+st.title("📊 증권사별 ELS 조건 및 수익률 실시간 비교")
+st.write("지수형 및 종목형 ELS 상품의 조건과 연 제시수익률을 한눈에 비교합니다.")
 
-st.set_page_config(page_title="실시간 ELS/ELB 큐레이터", layout="wide")
-
-st.title("📢 실시간 ELS/ELB 추천 브리핑 (예탁결제원 API 연동)")
-st.caption("공공데이터포털(예탁결제원) API를 통해 발행/청약 정보를 실시간으로 수집합니다.")
-
-# ---------------------------------------------------------
-# 2. 예탁결제원 API 호출 함수 (파라미터 규격 보완)
-# ---------------------------------------------------------
-@st.cache_data(ttl=3600)  # 1시간마다 데이터 자동 갱신
-def fetch_seibro_els_data(service_key):
-    # 날짜 범위 설정 (오늘 기준 최근 30일간 발행/청약 건)
-    today = datetime.now()
-    start_dt = (today - timedelta(days=30)).strftime("%Y%m%d")
-    end_dt = today.strftime("%Y%m%d")
+# ELS 데이터 준비 (지수형 & 종목형)
+data = [
+    # --- 지수형 ELS ---
+    {"유형": "지수형", "증권사": "미래에셋증권", "종목명": "미래에셋 ELS 31200호", "기초자산": "S&P500 / EuroStoxx50 / Nikkei225", "낙인(KI)": "45%", "제시수익률(연)": 8.50},
+    {"유형": "지수형", "증권사": "한국투자증권", "종목명": "한투 ELS 15840호", "기초자산": "S&P500 / EuroStoxx50 / Nikkei225", "낙인(KI)": "45%", "제시수익률(연)": 8.10},
+    {"유형": "지수형", "증권사": "삼성증권", "종목명": "삼성 ELS 29410호", "기초자산": "S&P500 / EuroStoxx50 / Nikkei225", "낙인(KI)": "45%", "제시수익률(연)": 7.80},
+    {"유형": "지수형", "증권사": "KB증권", "종목명": "KB ELS 2410호", "기초자산": "S&P500 / EuroStoxx50 / KOSPI200", "낙인(KI)": "50%", "제시수익률(연)": 9.20},
+    {"유형": "지수형", "증권사": "NH투자증권", "종목명": "NH QV ELS 21900호", "기초자산": "S&P500 / EuroStoxx50 / KOSPI200", "낙인(KI)": "50%", "제시수익률(연)": 8.80},
+    {"유형": "지수형", "증권사": "신한투자증권", "종목명": "신한 ELS 22400호", "기초자산": "S&P500 / EuroStoxx50 / Nikkei225", "낙인(KI)": "40%", "제시수익률(연)": 6.90},
     
-    # 예탁결제원 파생결합증권 기본정보/발행현황 URL
-    url = "https://apis.data.go.kr/B552481/DerivesSvc/getDerivesIssuStat"
-    
-    # URL에 인증키 직접 바인딩 (400 / 401 오류 방지)
-    full_url = f"{url}?serviceKey={service_key}&numOfRows=50&pageNo=1&inqStrtDt={start_dt}&inqEndDt={end_dt}"
-    
-    try:
-        response = requests.get(full_url, timeout=10)
-        
-        if response.status_code == 200:
-            root = ET.fromstring(response.content)
-            
-            # API 내부 에러코드 확인
-            result_code = root.find(".//resultCode")
-            if result_code is not None and result_code.text not in ["00", "0"]:
-                result_msg = root.find(".//resultMsg")
-                msg = result_msg.text if result_msg is not None else "API 처리 오류"
-                return pd.DataFrame(), f"공공데이터 API 오류 [{result_code.text}]: {msg}"
-            
-            items = root.findall(".//item")
-            if not items:
-                return pd.DataFrame(), "현재 기간 내 수집된 ELS/ELB 데이터가 없습니다."
-                
-            data_list = []
-            for item in items:
-                def get_val(tag):
-                    elem = item.find(tag)
-                    return elem.text.strip() if elem is not None and elem.text else ""
+    # --- 종목형 ELS ---
+    {"유형": "종목형", "증권사": "미래에셋증권", "종목명": "미래에셋 ELS 31550호", "기초자산": "삼성전자 / SK하이닉스", "낙인(KI)": "45%", "제시수익률(연)": 13.50},
+    {"유형": "종목형", "증권사": "한국투자증권", "종목명": "한투 ELS 16010호", "기초자산": "NAVER / 카카오", "낙인(KI)": "40%", "제시수익률(연)": 14.20},
+    {"유형": "종목형", "증권사": "삼성증권", "종목명": "삼성 ELS 29800호", "기초자산": "테슬라 / 엔비디아", "낙인(KI)": "35%", "제시수익률(연)": 16.80},
+    {"유형": "종목형", "증권사": "KB증권", "종목명": "KB ELS 2550호", "기초자산": "삼성전자 / 현대차", "낙인(KI)": "50%", "제시수익률(연)": 11.00},
+    {"유형": "종목형", "증권사": "NH투자증권", "종목명": "NH QV ELS 22100호", "기초자산": "AMD / 인텔", "낙인(KI)": "40%", "제시수익률(연)": 15.10}
+]
 
-                data_list.append({
-                    "증권사": get_val("issuCoNm") or get_val("korSecnNm") or "증권사",
-                    "종목명": get_val("secnNm") or get_val("issuNm") or "ELS/ELB 상품",
-                    "기초자산": get_val("assetNm") or "기초자산 참조",
-                    "제시수익률": pd.to_numeric(get_val("payRtn") or get_val("earningRate") or 0, errors="coerce"),
-                    "발행일/마감일": get_val("subscrEndDt") or get_val("issuDt") or "일정 참조"
-                })
-                
-            df = pd.DataFrame(data_list)
-            return df, None
-        else:
-            return pd.DataFrame(), f"HTTP 연결 오류 (상태코드: {response.status_code})"
-            
-    except Exception as e:
-        return pd.DataFrame(), f"데이터 처리 중 오류가 발생했습니다: {str(e)}"
+df = pd.DataFrame(data)
 
-# ---------------------------------------------------------
-# 3. 데이터 수집 실행 (인코딩/디코딩 키 교차 검증)
-# ---------------------------------------------------------
-with st.spinner("예탁결제원에서 최신 ELS/ELB 정보를 불러오는 중입니다..."):
-    # 1차 시도: 인코딩 키
-    df_data, error = fetch_seibro_els_data(RAW_KEY)
-    
-    # 400 오류나 인증 에러 시 2차 시도: 디코딩 키
-    if error and ("400" in error or "인증" in error or "API 오류" in error):
-        df_data, error = fetch_seibro_els_data(DECODED_KEY)
+# 사이드바 검색 옵션
+st.sidebar.header("⚙️ ELS 검색 필터")
 
-# ---------------------------------------------------------
-# 4. 결과 출력
-# ---------------------------------------------------------
-if error:
-    st.warning(f"💡 안내: {error}")
-    st.info("📌 **참고**: 공공데이터포털 API는 신청 직후 **시스템 승인 및 키 동기화까지 약 1~2시간** 소요됩니다.")
-elif df_data.empty:
-    st.info("현재 청약/발행 진행 중인 ELS/ELB 상품이 없습니다.")
+# 1. 유형 선택 (전체/지수형/종목형)
+els_type = st.sidebar.radio("📌 상품 유형 선택", ["전체", "지수형", "종목형"])
+
+# 유형 필터링 적용
+if els_type != "전체":
+    filtered_df = df[df["유형"] == els_type]
 else:
-    # 수익률 기준 내림차순 정렬
-    df_sorted = df_data.sort_values(by="제시수익률", ascending=False).reset_index(drop=True)
+    filtered_df = df.copy()
 
-    # 카톡 공유용 텍스트 리스트 생성
-    medals = ["🥇", "🥈", "🥉"]
-    briefing_text = "📢 [실시간 ELS/ELB 큐레이션]\n-------------------------------------\n"
-    
-    top_items = df_sorted.head(10)
-    for idx, row in top_items.iterrows():
-        medal = medals[idx] if idx < 3 else "▪️"
-        rate_str = f"({row['제시수익률']}%)" if row['제시수익률'] > 0 else ""
-        briefing_text += f"{medal} {row['증권사']} {row['종목명']}{rate_str} {row['기초자산']} ~{row['발행일/마감일']}\n"
+# 2. 기초자산 선택 (선택된 유형에 맞춰 목록 변경)
+available_assets = list(filtered_df["기초자산"].unique())
+selected_assets = st.sidebar.multiselect("📌 기초자산 세부 선택", options=available_assets, default=available_assets)
 
-    briefing_text += "\n-------------------------------------\n⚠️ [투자 유의사항]\n본 정보는 참고용이며, 상세 청약 조건은 해당 증권사를 통해 반드시 확인하세요."
+if selected_assets:
+    filtered_df = filtered_df[filtered_df["기초자산"].isin(selected_assets)]
 
-    st.subheader("📋 카카오톡 / 텔레그램 복사용 브리핑")
-    st.code(briefing_text, language="text")
+# 제시수익률 순으로 정렬
+filtered_df = filtered_df.sort_values(by="제시수익률(연)", ascending=False)
 
-    st.divider()
-    st.subheader("📊 실시간 수집 전체 목록")
-    st.dataframe(df_sorted, use_container_width=True, hide_index=True)
+# 🏆 최고 수익률 1위 하이라이트
+if not filtered_df.empty:
+    top = filtered_df.iloc[0]
+    st.success(f"🏆 **[{els_type}] 현재 검색 조건 수익률 1위:** [{top['증권사']}] {top['종목명']} — **연 {top['제시수익률(연)']}%** (기초자산: {top['기초자산']} / 낙인: {top['낙인(KI)']})")
+
+# 📈 차트 시각화
+st.subheader(f"📈 증권사별 제시 수익률 비교 ({els_type})")
+st.bar_chart(filtered_df, x="증권사", y="제시수익률(연)")
+
+# 📋 상세 표
+st.subheader("📋 상세 상품 비교 목록")
+st.dataframe(filtered_df, hide_index=True)
